@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Заявка на подключение Интернет Дома</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://api-maps.yandex.ru/2.1/?apikey=29954df2-70a5-4786-a0ad-417a1b83ef95&lang=ru_RU" type="text/javascript"></script>
+</head>
+<body>
+    <div class="form-container">
+        <h2>Заявка на подключение Интернет Дома</h2>
+        <form id="application-form">
+            <div class="form-group">
+                <label for="city">Город</label>
+                <select id="city" name="city" required>
+                    <!-- Список городов будет заполнен динамически -->
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="name">ФИО</label>
+                <input type="text" id="name" name="name" pattern="[А-Яа-яЁё\s]+" required>
+            </div>
+            <div class="form-group">
+                <label for="phone">Контактный номер</label>
+                <input type="text" id="phone" name="phone" pattern="8 \d{3} \d{2} \d{2}" required>
+            </div>
+            <div class="form-group">
+                <label for="address">Адрес ЖК</label>
+                <input type="text" id="address" name="address" readonly required>
+            </div>
+            <div class="map-container" id="map"></div>
+            <button type="submit" class="submit-btn">Отправить заявку</button>
+        </form>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

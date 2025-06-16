@@ -1,74 +1,273 @@
-// Заполнение списка городов
-const cities = ["Алматы", "Астана", "Шымкент", "Костанай"];
-const citySelect = document.getElementById('city');
-cities.forEach(city => {
-    const option = document.createElement('option');
-    option.value = city;
-    option.text = city;
-    citySelect.appendChild(option);
-});
+document.addEventListener("DOMContentLoaded", function () {
+    let map, placemark;
+    let cityCenters = {}; // Здесь храниться координаты после геокодирования
 
-// Инициализация карты Яндекс
-ymaps.ready(init);
-function init() {
-    var myMap = new ymaps.Map("map", {
-        center: [51.169392, 71.449074], // Координаты для примера (Астана)
-        zoom: 10
-    });
+    ymaps.ready(initMap);
 
-    // Изменение центра карты при выборе города
-    citySelect.addEventListener('change', function() {
-        const selectedCity = this.value;
-        if (selectedCity === "Алматы") {
-            myMap.setCenter([43.238949, 76.889709], 10);
-        } else if (selectedCity === "Астана") {
-            myMap.setCenter([51.169392, 71.449074], 10);
-        } else if (selectedCity === "Шымкент") {
-            myMap.setCenter([42.315556, 69.5892], 10);
-        } else if (selectedCity === "Костанай") {
-            myMap.setCenter([53.219993, 63.631906], 10);
+    function initMap() {
+        const citySelect = document.getElementById("city");
+        const defaultCity = citySelect.value;
+
+        // Получаем список всех названий городов из <select>
+        const citiesToLoad = Array.from(citySelect.options).map(opt => opt.value);
+
+        // Функция геокодирования одного города
+        function geocodeCity(cityName) {
+            return ymaps.geocode(cityName).then(res => {
+                const firstObject = res.geoObjects.get(0);
+                if (firstObject) {
+                    const coords = firstObject.geometry.getCoordinates();
+                    cityCenters[cityName] = coords;
+                } else {
+                    console.warn(`Не найдены координаты для города "${cityName}"`);
+                }
+            });
         }
-    });
 
-    // Получение адреса ЖК при клике на карте
-    myMap.events.add('click', function (e) {
-        var coords = e.get('coords');
-        ymaps.geocode(coords).then(function (res) {
-            var firstGeoObject = res.geoObjects.get(0);
-            document.getElementById('address').value = firstGeoObject.getAddressLine();
+        // Геокодируем все города параллельно
+        Promise.all(citiesToLoad.map(geocodeCity)).then(() => {
+            const defaultCityCenter = cityCenters[defaultCity];
+            if (!defaultCityCenter) {
+                alert("Невозможно загрузить карту: не найдены координаты для выбранного города.");
+                return;
+            }
+
+            // Создаём карту
+            map = new ymaps.Map("map", {
+                center: defaultCityCenter,
+                zoom: 10,
+                controls: []
+            });
+
+            // SearchControl
+            const searchControl = new ymaps.control.SearchControl({
+                options: {
+                    noPlacemark: true,
+                    boundedBy: [
+                        [defaultCityCenter[0] - 0.1, defaultCityCenter[1] - 0.1],
+                        [defaultCityCenter[0] + 0.1, defaultCityCenter[1] + 0.1]
+                    ],
+                    placeholderContent: 'Таңдалған қала бойынша үйді іздеу'
+                }
+            });
+            map.controls.add(searchControl);
+
+            // === geolocationControl с обработкой locationchange ===
+            const geolocationControl = new ymaps.control.GeolocationControl();
+            map.controls.add(geolocationControl);
+
+            geolocationControl.events.add('locationchange', function (e) {
+                const position = e.get('position');
+                if (position) {
+                    const coords = position.geometry.getCoordinates();
+                    map.setCenter(coords, 16);
+                    setPlacemarkAndAddress(coords);
+                }
+            });
+
+            // Клик по карте
+            map.events.add("click", function (e) {
+                const coords = e.get("coords");
+                setPlacemarkAndAddress(coords);
+            });
+
+            // Поиск дома через SearchControl
+            searchControl.events.add("resultselect", function (e) {
+                const index = e.get("index");
+                searchControl.getResult(index).then(function (res) {
+                    const coords = res.geometry.getCoordinates();
+                    map.setCenter(coords, 16);
+                    setPlacemarkAndAddress(coords);
+                });
+            });
+
+            // Смена города в выпадающем списке
+            citySelect.addEventListener("change", function () {
+                const selectedCity = this.value;
+                const selectedCityCenter = cityCenters[selectedCity];
+                if (selectedCityCenter) {
+                    map.setCenter(selectedCityCenter, 10);
+                    searchControl.options.set('boundedBy', [
+                        [selectedCityCenter[0] - 0.1, selectedCityCenter[1] - 0.1],
+                        [selectedCityCenter[0] + 0.1, selectedCityCenter[1] + 0.1]
+                    ]);
+                } else {
+                    alert("Не найдены координаты для выбранного города.");
+                }
+            });
+
+            // Кнопка "Мое местоположение"
+            const geolocationButton = new ymaps.control.Button({
+                data: {
+                    content: "Мое местоположение",
+                    title: "Определить текущее местоположение"
+                },
+                options: {
+                    layout: 'default#buttonLayoutWithIcon',
+                    iconStyle: {
+                        imageHref: 'https://cdn-icons-png.flaticon.com/512/1163/1163661.png', 
+                        imageSize: [24, 24],
+                        imageOffset: [-12, -12]
+                    }
+                }
+            });
+
+            geolocationButton.events.add('click', function () {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        function (position) {
+                            const userCoords = [position.coords.latitude, position.coords.longitude];
+                            map.setCenter(userCoords, 16);
+                            setPlacemarkAndAddress(userCoords);
+                        },
+                        function (error) {
+                            console.warn("Геолокация недоступна:", error.message);
+                            alert("Не удалось определить местоположение.");
+                        }
+                    );
+                } else {
+                    alert("Геолокация не поддерживается вашим браузером.");
+                }
+            });
+
+            map.controls.add(geolocationButton);
+
+            // Автоматическое определение местоположения на мобильных устройствах
+            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+            if (isMobile && navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    function (position) {
+                        const userCoords = [position.coords.latitude, position.coords.longitude];
+                        map.setCenter(userCoords, 16);
+                        setPlacemarkAndAddress(userCoords);
+                    },
+                    function (error) {
+                        console.warn("Геолокация недоступна:", error.message);
+                    }
+                );
+            }
         });
-    });
-}
+    }
 
-// Отправка данных формы в Google Sheets
-const form = document.getElementById('application-form');
-form.addEventListener('submit', function(event) {
-    event.preventDefault();
-    const formData = new FormData(form);
-    const data = {
-        city: formData.get('city'),
-        name: formData.get('name'),
-        phone: formData.get('phone'),
-        address: formData.get('address'),
-        coords: formData.get('coords'), // Добавь получение координат ЖК
-        date: new Date().toLocaleString(),
-    };
+    function createPlacemark(coords) {
+        return new ymaps.Placemark(coords, {}, {
+            preset: "islands#blueDotIcon",
+            draggable: false
+        });
+    }
 
-    fetch('https://script.google.com/macros/s/AKfycbwE5NkgoPi3UfyIoh_Me35BvG00ydSoi63weYB7lQqku6i7lOJ5O6ugEVE8C82NSEdh/exec', {
-        method: 'POST',
-        mode: 'cors', // Включаем CORS
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    }).then(response => response.json())
-    .then(responseData => {
-        if (responseData.result === 'success') {
-            alert('Заявка успешно отправлена!');
+    function setPlacemarkAndAddress(coords) {
+        if (placemark) {
+            placemark.geometry.setCoordinates(coords);
         } else {
-            alert('Произошла ошибка при отправке заявки.');
+            placemark = createPlacemark(coords);
+            map.geoObjects.add(placemark);
         }
-    }).catch(error => {
-        console.error('Ошибка:', error);
+        getAddress(coords);
+    }
+
+    function getAddress(coords) {
+        ymaps.geocode(coords).then(function (res) {
+            const firstGeoObject = res.geoObjects.get(0);
+            const address = firstGeoObject.getAddressLine();
+            document.getElementById("address").value = address;
+            document.getElementById("coordinates").value = coords.join(", ");
+            const preview = document.getElementById("selected-address");
+            if (preview) {
+                preview.innerText = 'Таңдалған мекенжай: ' + address;
+            }
+
+            const citySelect = document.getElementById("city");
+            let detectedCity = firstGeoObject.getLocalities()[0] || firstGeoObject.getAdministrativeAreas()[0];
+            if (detectedCity) {
+                const detected = detectedCity.toLowerCase();
+                let matched = false;
+                for (let i = 0; i < citySelect.options.length; i++) {
+                    const optionText = citySelect.options[i].text.toLowerCase();
+                    if (optionText.includes(detected)) {
+                        citySelect.selectedIndex = i;
+                        matched = true;
+                        break;
+                    }
+                }
+                const detectedCityInput = document.getElementById("detected_city");
+                if (detectedCityInput) {
+                    detectedCityInput.value = detectedCity;
+                }
+                if (!matched) {
+                    const customOption = new Option(detectedCity, detectedCity, true, true);
+                    citySelect.add(customOption, 0);
+                    citySelect.selectedIndex = 0;
+                }
+            }
+
+            const confirmation = document.getElementById("confirmation");
+            if (confirmation) {
+                confirmation.classList.remove("hidden");
+                setTimeout(() => confirmation.classList.add("hidden"), 800000);
+            }
+        });
+    }
+
+    // === Отправка формы ===
+    document.getElementById("submissionForm").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        const address = document.getElementById("address").value.trim();
+        const coordinates = document.getElementById("coordinates").value.trim();
+        const submitBtn = document.querySelector("#submissionForm button[type='submit']");
+        if (address === "" || coordinates === "") {
+            alert("Үй мекенжайын картадан таңдаңыз немесе геолокацияны қосыңыз.");
+            return;
+        }
+        const formData = new FormData(event.target);
+        if (submitBtn) submitBtn.disabled = true;
+        try {
+            const response = await fetch("https://script.google.com/macros/s/AKfycbyvGVEFMym5wPSWUHnfhl_KN_oDnhsgvmRGSohGK1CmUF8JeHkNl_Pd8HLuglQSlSpa/exec",  {
+                method: "POST",
+                body: formData,
+            });
+            if (response.ok) {
+                alert("Өтініміңіз үшін рақмет! Біз оны алдағы бірнеше жұмыс күні ішінде қарастырамыз.\n\nЕгер үйіңіздегі тұрғындардың көпшілігі «Үйге Интернет» қосу үшін өтінім берсе, біз сіздің мекенжайыңыз бойынша желі құрылысын басымдықпен орындай аламыз.\nСенім білдіргеніңіз үшін рақмет!");
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.innerText = "Өтінім жіберілді";
+                }
+                resetForm(false);
+                return;
+            }
+            alert("Жіберу кезінде қате пайда болды. Қайтадан кейінірек көріңіз.");
+            if (submitBtn) submitBtn.disabled = false;
+        } catch (error) {
+            console.error("Ошибка:", error);
+            alert("Деректерді жіберу кезінде қате пайда болды.");
+            if (submitBtn) submitBtn.disabled = false;
+        }
+    });
+
+    function resetForm(preserveDisable = true) {
+        document.getElementById("submissionForm").reset();
+        if (placemark) {
+            map.geoObjects.remove(placemark);
+            placemark = null;
+        }
+        const preview = document.getElementById("selected-address");
+        if (preview) preview.innerText = 'Мекенжай таңдалмады';
+        const confirmation = document.getElementById("confirmation");
+        if (confirmation) confirmation.classList.add("hidden");
+        if (!preserveDisable) {
+            const submitBtn = document.querySelector("#submissionForm button[type='submit']");
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerText = "Өтінімді жіберу";
+            }
+        }
+    }
+
+    // === Ограничения ввода ===
+    document.getElementById("name").addEventListener("input", function () {
+        this.value = this.value.replace(/[^А-Яа-яЁёӘәӨөҚқҢңҰұҮүҺһІі\s\-]/g, '');
+    });
+    document.getElementById("phone").addEventListener("input", function () {
+        this.value = this.value.replace(/[^\d]/g, '');
     });
 });

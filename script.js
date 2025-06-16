@@ -39,6 +39,9 @@ document.addEventListener("DOMContentLoaded", function () {
                 controls: []
             });
 
+// Добавляем нужные контролы
+map.controls.add('zoomControl');
+            
             // SearchControl
             const searchControl = new ymaps.control.SearchControl({
                 options: {
